@@ -1,26 +1,104 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-const player = {
-    x: 100,
-    y: 150,
-    width: 40,
-    height: 40,
-    speed: 200,
-};
+class Player {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.width = 40;
+        this.height = 40;
+        this.speed = 200;
+        this.health = 100;
+        this.maxHealth = 100;
+        this.damageCooldown = 0;
+        this.damageCooldownDuration = 0.25;
+    }
+    update(deltaTime, keys, canvas) {
+        if (keys["ArrowRight"]) this.x += this.speed * deltaTime;
+        if (keys["ArrowLeft"]) this.x -= this.speed * deltaTime;
+        if (keys["ArrowDown"]) this.y += this.speed * deltaTime;
+        if (keys["ArrowUp"]) this.y -= this.speed * deltaTime;
+        this.keepInBounds(canvas);
+        this.updateDamageCooldown(deltaTime);
+    }
+    keepInBounds(canvas) {
+        if (this.x < 0) this.x = 0;
+        if (this.x + this.width > canvas.width) {
+            this.x = canvas.width - this.width;
+        }
+        if (this.y < 0) this.y = 0;
+        if (this.y + this.height > canvas.height) {
+            this.y = canvas.height - this.height;
+        }
+    }
+    updateDamageCooldown(deltaTime) {
+        if (this.damageCooldown > 0) {
+            this.damageCooldown -= deltaTime;
+            if (this.damageCooldown < 0) {
+                this.damageCooldown = 0;
+            }
+        }
+    }
+    takeDamage(amount) {
+        if (this.damageCooldown > 0 || isGameOver) return;
+        this.health -= amount;
+        if (this.health <= 0) {
+            this.health = 0;
+            isGameOver = true;
+        }
+        this.damageCooldown = this.damageCooldownDuration;
+    }
+    draw(ctx) {
+        if (this.damageCooldown > 0) {
+            ctx.fillStyle = "yellow";
+        } else {
+            ctx.fillStyle = "lime";
+        }
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+    }
+}
+
+const player = new Player(100, 150);
+
+const upgrades = [
+    {
+        id: "attack_speed",
+        name: "Faster Attacks",
+        apply: function () {
+            console.log(`Old attack speed: ${attackInterval}/second`);
+            attackInterval *= 0.9;
+            if (attackInterval < 0.1) attackInterval = 0.1;
+            console.log(`New attack speed: ${attackInterval}/second`);
+        },
+    },
+    {
+        id: "move_speed",
+        name: "Swiftboots",
+        apply: function () {
+            player.speed += 25;
+        },
+    },
+    {
+        id: "max_health",
+        name: "More Health",
+        apply: function () {
+            player.health += 20;
+            player.maxHealth += 20;
+        },
+    },
+];
 
 let woodCount = 0;
 let lastTime = 0;
 let enemySpawnTimer = 0;
-let playerHealth = 100;
-let damageCooldown = 0;
-const damageCooldownDuration = 1;
 let isGameOver = false;
-let facingX = 1;
-let facingY = 0;
 let attackTimer = 0;
-const attackInterval = 0.5;
+let attackInterval = 1.5;
 let playerXp = 0;
+let playerLevel = 1;
+let xpToNextLevel = 10;
+let isChoosingUpgrade = false;
+let currentUpgradeChoices = [];
 
 const keys = {};
 
@@ -28,6 +106,12 @@ window.addEventListener("keydown", (e) => {
     keys[e.key] = true;
     if (isGameOver && e.key.toLowerCase() === "r") {
         restartGame();
+    }
+    if (isChoosingUpgrade) {
+        if (e.key === "1") chooseUpgrade(0);
+        if (e.key === "2") chooseUpgrade(1);
+        if (e.key === "3") chooseUpgrade(2);
+        return;
     }
 });
 
@@ -37,9 +121,9 @@ window.addEventListener("keyup", (e) => {
 
 function update(deltaTime) {
     if (isGameOver) return;
-    updatePlayer(deltaTime);
+    if (isChoosingUpgrade) return;
+    player.update(deltaTime, keys, canvas);
     updateTrees();
-    updatePlayerDamageCooldown(deltaTime);
     updateEnemies(deltaTime);
     updateProjectiles(deltaTime);
     handleProjectileEnemyCollisions();
@@ -52,8 +136,9 @@ function restartGame() {
     player.x = 100;
     player.y = 150;
     woodCount = 0;
-    playerHealth = 100;
-    damageCooldown = 0;
+    player.maxHealth = 100;
+    player.health = player.maxHealth;
+    player.damageCooldown = 0;
     enemySpawnTimer = 0;
     isGameOver = false;
     trees.length = 0;
@@ -70,32 +155,12 @@ function restartGame() {
         keys[key] = false;
     }
     projectiles.length = 0;
-}
-
-function updatePlayer(deltaTime) {
-    if (keys["ArrowRight"]) {
-        player.x += player.speed * deltaTime;
-        facingX = 1;
-        facingY = 0;
-    }
-
-    if (keys["ArrowLeft"]) {
-        player.x -= player.speed * deltaTime;
-        facingX = -1;
-        facingY = 0;
-    }
-    if (keys["ArrowUp"]) {
-        player.y -= player.speed * deltaTime;
-        facingX = 0;
-        facingY = -1;
-    }
-    if (keys["ArrowDown"]) {
-        player.y += player.speed * deltaTime;
-        facingX = 0;
-        facingY = 1;
-    }
-
-    keepPlayerInBounds();
+    playerLevel = 1;
+    xpToNextLevel = 10;
+    isChoosingUpgrade = false;
+    currentUpgradeChoices = [];
+    attackInterval = 1.5;
+    player.speed = 200;
 }
 
 function updateTrees() {
@@ -123,7 +188,7 @@ function updateEnemies(deltaTime) {
         enemy.x += dx * enemy.speed * deltaTime;
         enemy.y += dy * enemy.speed * deltaTime;
         if (isColliding(player, enemy)) {
-            damagePlayer(25);
+            player.takeDamage(25);
         }
     }
 }
@@ -136,28 +201,7 @@ function updateEnemySpawning(deltaTime) {
     }
 }
 
-function updatePlayerDamageCooldown(deltaTime) {
-    if (damageCooldown > 0) {
-        damageCooldown -= deltaTime;
-        if (damageCooldown < 0) {
-            damageCooldown = 0;
-        }
-    }
-}
-
-function damagePlayer(amount) {
-    if (damageCooldown > 0 || isGameOver) return;
-    playerHealth -= amount;
-    if (playerHealth <= 0) {
-        playerHealth = 0;
-        isGameOver = true;
-    }
-    damageCooldown = damageCooldownDuration;
-}
-
-function shootProjectile() {
-    const target = findNearestEnemy();
-    if (!target) return;
+function shootProjectile(target) {
     const projectileSize = 10;
     const playerCenterX = player.x + player.width / 2;
     const playerCenterY = player.y + player.height / 2;
@@ -212,8 +256,10 @@ function handleProjectileEnemyCollisions() {
 function updateAutoAttack(deltaTime) {
     attackTimer += deltaTime;
     if (attackTimer >= attackInterval) {
+        const target = findNearestEnemy();
+        if (!target) return;
         attackTimer = 0;
-        shootProjectile();
+        shootProjectile(target);
     }
 }
 
@@ -252,14 +298,38 @@ function updateXpPickups() {
         if (isColliding(player, xpPickups[i])) {
             playerXp += xpPickups[i].value;
             xpPickups.splice(i, 1);
+            checkLevelUp();
         }
     }
+}
+
+function checkLevelUp() {
+    while (playerXp >= xpToNextLevel) {
+        playerXp -= xpToNextLevel;
+        playerLevel += 1;
+        xpToNextLevel += 10;
+        currentUpgradeChoices = getRandomUpgrades(3);
+        isChoosingUpgrade = true;
+    }
+}
+
+function getRandomUpgrades(count) {
+    const shuffled = [...upgrades].sort(() => Math.random() - 0.5);
+    return shuffled.splice(0, count);
+}
+
+function chooseUpgrade(index) {
+    const chosenUpgrade = currentUpgradeChoices[index];
+    if (!chosenUpgrade) return;
+    chosenUpgrade.apply();
+    currentUpgradeChoices = [];
+    isChoosingUpgrade = false;
 }
 
 function draw() {
     clearScreen();
     drawBorder();
-    drawPlayer();
+    player.draw(ctx);
     drawTrees();
     drawXpPickups();
     drawEnemies();
@@ -268,19 +338,13 @@ function draw() {
     if (isGameOver) {
         drawGameOverScreen();
     }
+    if (isChoosingUpgrade) {
+        drawUpgradeMenu();
+    }
 }
 
 function clearScreen() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-function drawPlayer() {
-    if (damageCooldown > 0) {
-        ctx.fillStyle = "yellow";
-    } else {
-        ctx.fillStyle = "lime";
-    }
-    ctx.fillRect(player.x, player.y, player.width, player.height);
 }
 
 function drawTrees() {
@@ -308,8 +372,9 @@ function drawUI() {
     ctx.fillStyle = "grey";
     ctx.font = "20px Arial";
     ctx.fillText("Wood: " + woodCount, 20, 30);
-    ctx.fillText("Health: " + playerHealth, 20, 60);
-    ctx.fillText("XP: " + playerXp, 20, 90);
+    ctx.fillText("Health: " + player.health, 20, 60);
+    ctx.fillText("Player Level: " + playerLevel, 440, 30);
+    ctx.fillText("XP: " + playerXp + " / " + xpToNextLevel, 480, 60);
 }
 
 function drawGameOverScreen() {
@@ -350,16 +415,23 @@ function drawXpPickups() {
     }
 }
 
-function keepPlayerInBounds() {
-    if (player.x < 0) player.x = 0;
-    if (player.x + player.width > canvas.width) {
-        player.x = canvas.width - player.width;
+function drawUpgradeMenu() {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "white";
+    ctx.font = "32px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("Choose an Upgrade", canvas.width / 2, 120);
+    ctx.font = "24px Arial";
+    for (let i = 0; i < currentUpgradeChoices.length; i++) {
+        const choice = currentUpgradeChoices[i];
+        ctx.fillText(
+            `${i + 1}. ${choice.name}`,
+            canvas.width / 2,
+            200 + i * 50,
+        );
     }
-
-    if (player.y < 0) player.y = 0;
-    if (player.y + player.height > canvas.height) {
-        player.y = canvas.height - player.height;
-    }
+    ctx.textAlign = "left";
 }
 
 function isColliding(a, b) {
