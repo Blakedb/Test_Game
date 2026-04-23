@@ -58,6 +58,34 @@ class Player {
     }
 }
 
+class Projectile {
+    constructor(x, y, dx, dy) {
+        this.x = x;
+        this.y = y;
+        this.width = 10;
+        this.height = 10;
+        this.speed = 400;
+        this.dx = dx;
+        this.dy = dy;
+    }
+    update(deltaTime) {
+        this.x += this.dx * this.speed * deltaTime;
+        this.y += this.dy * this.speed * deltaTime;
+    }
+    draw(ctx) {
+        ctx.fillStyle = "cyan";
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+    }
+    isOffScreen(canvas) {
+        return (
+            this.x + this.width < 0 ||
+            this.x > canvas.width ||
+            this.y + this.height < 0 ||
+            this.y > canvas.height
+        );
+    }
+}
+
 const player = new Player(100, 150);
 
 const upgrades = [
@@ -202,7 +230,6 @@ function updateEnemySpawning(deltaTime) {
 }
 
 function shootProjectile(target) {
-    const projectileSize = 10;
     const playerCenterX = player.x + player.width / 2;
     const playerCenterY = player.y + player.height / 2;
     const targetCenterX = target.x + target.width / 2;
@@ -213,28 +240,15 @@ function shootProjectile(target) {
     if (distance === 0) return;
     dx /= distance;
     dy /= distance;
-    projectiles.push({
-        x: playerCenterX - projectileSize / 2,
-        y: playerCenterY - projectileSize / 2,
-        width: projectileSize,
-        height: projectileSize,
-        speed: 400,
-        dx: dx,
-        dy: dy,
-    });
+    projectiles.push(
+        new Projectile(playerCenterX - 5, playerCenterY - 5, dx, dy),
+    );
 }
 
 function updateProjectiles(deltaTime) {
     for (let i = projectiles.length - 1; i >= 0; i--) {
-        const projectile = projectiles[i];
-        projectile.x += projectile.dx * projectile.speed * deltaTime;
-        projectile.y += projectile.dy * projectile.speed * deltaTime;
-        const isOffScreen =
-            projectile.x + projectile.width < 0 ||
-            projectile.x > canvas.width ||
-            projectile.y + projectile.height < 0 ||
-            projectile.y > canvas.height;
-        if (isOffScreen) {
+        projectiles[i].update(deltaTime);
+        if (projectiles[i].isOffScreen(canvas)) {
             projectiles.splice(i, 1);
         }
     }
@@ -397,14 +411,8 @@ function drawGameOverScreen() {
 }
 
 function drawProjectiles() {
-    ctx.fillStyle = "cyan";
     for (let projectile of projectiles) {
-        ctx.fillRect(
-            projectile.x,
-            projectile.y,
-            projectile.width,
-            projectile.height,
-        );
+        projectile.draw(ctx);
     }
 }
 
