@@ -18,6 +18,9 @@ const damageCooldownDuration = 1;
 let isGameOver = false;
 let facingX = 1;
 let facingY = 0;
+let attackTimer = 0;
+const attackInterval = 0.5;
+let playerXp = 0;
 
 const keys = {};
 
@@ -25,9 +28,6 @@ window.addEventListener("keydown", (e) => {
     keys[e.key] = true;
     if (isGameOver && e.key.toLowerCase() === "r") {
         restartGame();
-    }
-    if (!isGameOver && e.key === " ") {
-        shootProjectile();
     }
 });
 
@@ -43,7 +43,9 @@ function update(deltaTime) {
     updateEnemies(deltaTime);
     updateProjectiles(deltaTime);
     handleProjectileEnemyCollisions();
+    updateXpPickups();
     updateEnemySpawning(deltaTime);
+    updateAutoAttack(deltaTime);
 }
 
 function restartGame() {
@@ -55,6 +57,8 @@ function restartGame() {
     enemySpawnTimer = 0;
     isGameOver = false;
     trees.length = 0;
+    playerXp = 0;
+    xpPickups.length = 0;
     for (let i = 0; i < 5; i++) {
         trees.push(createTree());
     }
@@ -152,17 +156,27 @@ function damagePlayer(amount) {
 }
 
 function shootProjectile() {
+    const target = findNearestEnemy();
+    if (!target) return;
     const projectileSize = 10;
     const playerCenterX = player.x + player.width / 2;
     const playerCenterY = player.y + player.height / 2;
+    const targetCenterX = target.x + target.width / 2;
+    const targetCenterY = target.y + target.height / 2;
+    let dx = targetCenterX - playerCenterX;
+    let dy = targetCenterY - playerCenterY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance === 0) return;
+    dx /= distance;
+    dy /= distance;
     projectiles.push({
         x: playerCenterX - projectileSize / 2,
         y: playerCenterY - projectileSize / 2,
         width: projectileSize,
         height: projectileSize,
         speed: 400,
-        dx: facingX,
-        dy: facingY,
+        dx: dx,
+        dy: dy,
     });
 }
 
@@ -186,10 +200,58 @@ function handleProjectileEnemyCollisions() {
     for (let i = projectiles.length - 1; i >= 0; i--) {
         for (let j = enemies.length - 1; j >= 0; j--) {
             if (isColliding(projectiles[i], enemies[j])) {
+                xpPickups.push(createXpPickup(enemies[j].x, enemies[j].y));
                 projectiles.splice(i, 1);
                 enemies.splice(j, 1);
                 break;
             }
+        }
+    }
+}
+
+function updateAutoAttack(deltaTime) {
+    attackTimer += deltaTime;
+    if (attackTimer >= attackInterval) {
+        attackTimer = 0;
+        shootProjectile();
+    }
+}
+
+function findNearestEnemy() {
+    if (enemies.length === 0) return null;
+    let nearestEnemy = enemies[0];
+    let nearestDistance = Infinity;
+    const playerCenterX = player.x + player.width / 2;
+    const playerCenterY = player.y + player.height / 2;
+    for (let enemy of enemies) {
+        const enemyCenterX = enemy.x + enemy.width / 2;
+        const enemyCenterY = enemy.y + enemy.height / 2;
+        const dx = enemyCenterX - playerCenterX;
+        const dy = enemyCenterY - playerCenterY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestEnemy = enemy;
+        }
+    }
+    return nearestEnemy;
+}
+
+function createXpPickup(x, y) {
+    return {
+        x: x,
+        y: y,
+        width: 12,
+        height: 12,
+        value: 1,
+    };
+}
+
+function updateXpPickups() {
+    for (let i = xpPickups.length - 1; i >= 0; i--) {
+        if (isColliding(player, xpPickups[i])) {
+            playerXp += xpPickups[i].value;
+            xpPickups.splice(i, 1);
         }
     }
 }
@@ -199,6 +261,7 @@ function draw() {
     drawBorder();
     drawPlayer();
     drawTrees();
+    drawXpPickups();
     drawEnemies();
     drawUI();
     drawProjectiles();
@@ -246,6 +309,7 @@ function drawUI() {
     ctx.font = "20px Arial";
     ctx.fillText("Wood: " + woodCount, 20, 30);
     ctx.fillText("Health: " + playerHealth, 20, 60);
+    ctx.fillText("XP: " + playerXp, 20, 90);
 }
 
 function drawGameOverScreen() {
@@ -276,6 +340,13 @@ function drawProjectiles() {
             projectile.width,
             projectile.height,
         );
+    }
+}
+
+function drawXpPickups() {
+    ctx.fillStyle = "gold";
+    for (let pickup of xpPickups) {
+        ctx.fillRect(pickup.x, pickup.y, pickup.width, pickup.height);
     }
 }
 
@@ -326,6 +397,7 @@ for (let i = 0; i < 3; i++) {
     enemies.push(createEnemy());
 }
 const projectiles = [];
+const xpPickups = [];
 function createEnemy() {
     const enemy = {
         x: 0,
